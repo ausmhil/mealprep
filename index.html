@@ -850,6 +850,26 @@
         </div>
     </div>
 
+	<!-- Global Firebase SDKs -->
+	<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js"></script>
+	<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js"></script>
+
+	<script>
+		const firebaseConfig = {
+			apiKey: "AIzaSyBBVBJZ0zss7YayQrB11aHL8qCIGmQbN6o",
+			authDomain: "meal-prep-tool.firebaseapp.com",
+			projectId: "meal-prep-tool",
+			storageBucket: "meal-prep-tool.firebasestorage.app",
+			messagingSenderId: "539149304858",
+			appId: "1:539149304858:web:53fc64ff2aaaf99a553da3"
+		};
+
+		// Initialize Firebase
+		const app = firebase.initializeApp(firebaseConfig);
+		const db = firebase.firestore();
+	</script>
+
+
     <script>
         // Recipe storage
         let recipes = [];
@@ -861,6 +881,57 @@
             2: 0.85,  // You + partner (175% / 2.05)
             3: 1.0    // Full family (205% / 2.05 = base)
         };
+		
+		function fetchAndRenderRecipes() {
+			const container = document.getElementById('recipes-list');
+
+			// Clear old dynamic recipes (keeps static demo recipes untouched)
+			container.querySelectorAll('.section-content').forEach(section => {
+				// remove everything except the first (hardcoded) recipe
+				const staticRecipes = section.querySelectorAll('.recipe');
+				staticRecipes.forEach((r, i) => { if (i > 0) r.remove(); });
+			});
+
+			db.collection("recipes").orderBy("timestamp").get().then(snapshot => {
+				snapshot.forEach(doc => {
+					const recipe = doc.data();
+
+					const nutritionParts = [];
+					if (recipe.nutrition.protein) nutritionParts.push(`${recipe.nutrition.protein}P`);
+					if (recipe.nutrition.carbs) nutritionParts.push(`${recipe.nutrition.carbs}C`);
+					if (recipe.nutrition.fats) nutritionParts.push(`${recipe.nutrition.fats}F`);
+
+					let nutritionStr = nutritionParts.length > 0 ? ` (${nutritionParts.join('/')}` : '';
+					if (recipe.nutrition.calories) {
+						nutritionStr += nutritionStr ? ` - ${recipe.nutrition.calories} cal per serving` : `(${recipe.nutrition.calories} cal per serving)`;
+					}
+					if (nutritionStr && !nutritionStr.endsWith(')')) nutritionStr += ')';
+
+					const newRecipe = document.createElement('div');
+					newRecipe.className = 'recipe';
+
+					const ingredientList = recipe.ingredients.map(ing => `<li>${ing}</li>`).join('');
+
+					newRecipe.innerHTML = `
+						<div class="recipe-actions">
+							<button onclick="editRecipe(this)" title="Edit">✏️</button>
+							<button onclick="deleteRecipe(this)" title="Delete">🗑️</button>
+						</div>
+						<h4>${recipe.name}${nutritionStr}</h4>
+						<ul class="ingredients">${ingredientList}</ul>
+					`;
+
+					const section = container.querySelector(`[data-category="${recipe.category}"] .section-content`);
+					if (section) {
+						section.appendChild(newRecipe);
+					}
+				});
+
+				// Reapply scaling
+				updatePortions();
+			});
+		}
+
 
         function switchTab(tabName) {
             // Hide all tab contents
@@ -924,67 +995,37 @@
         }
 
         // Handle recipe form submission
-        document.getElementById('new-recipe-form').addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const name = document.getElementById('recipe-name').value;
-            const category = document.getElementById('recipe-category').value;
-            const ingredients = document.getElementById('recipe-ingredients').value;
-            const calories = document.getElementById('recipe-calories').value || '';
-            const protein = document.getElementById('recipe-protein').value || '';
-            const carbs = document.getElementById('recipe-carbs').value || '';
-            const fats = document.getElementById('recipe-fats').value || '';
-            
-            // Create nutrition string
-            let nutritionStr = '';
-            const nutritionParts = [];
-            if (protein) nutritionParts.push(protein + 'P');
-            if (carbs) nutritionParts.push(carbs + 'C');
-            if (fats) nutritionParts.push(fats + 'F');
-            if (nutritionParts.length > 0) {
-                nutritionStr = ' (' + nutritionParts.join('/') + ')';
-            }
-            if (calories) {
-                nutritionStr += nutritionStr ? ' - ' + calories + ' cal per serving' : ' (' + calories + ' cal per serving)';
-            }
-            
-            // Create new recipe element
-            const newRecipe = document.createElement('div');
-            newRecipe.className = 'recipe';
-            
-            // Process ingredients into list items
-            const ingredientsList = ingredients.split('\n')
-                .filter(line => line.trim())
-                .map(ingredient => `<li>${ingredient.trim()}</li>`)
-                .join('');
-            
-            newRecipe.innerHTML = `
-                <div class="recipe-actions">
-                    <button onclick="editRecipe(this)" title="Edit">✏️</button>
-                    <button onclick="deleteRecipe(this)" title="Delete">🗑️</button>
-                </div>
-                <h4>${name}${nutritionStr}</h4>
-                <ul class="ingredients">
-                    ${ingredientsList}
-                </ul>
-            `;
-            
-            // Find the correct category section
-            const categorySection = document.querySelector(`[data-category="${category}"] .section-content`);
-            if (categorySection) {
-                categorySection.appendChild(newRecipe);
-            } else {
-                // Fallback to first section if category not found
-                const firstSection = document.querySelector('#recipes-list .section .section-content');
-                firstSection.appendChild(newRecipe);
-            }
-            
-            // Hide form and reset
-            hideRecipeForm();
-            
-            // Update portions for the new recipe
-            updatePortions();
-        });
+	// Handle recipe form submission — NOW SAVES TO FIREBASE
+	document.getElementById('new-recipe-form').addEventListener('submit', function(e) {
+		e.preventDefault();
+		
+		const name = document.getElementById('recipe-name').value;
+		const category = document.getElementById('recipe-category').value;
+		const ingredients = document.getElementById('recipe-ingredients').value.split('\n').filter(line => line.trim());
+		const calories = Number(document.getElementById('recipe-calories').value) || 0;
+		const protein = Number(document.getElementById('recipe-protein').value) || 0;
+		const carbs = Number(document.getElementById('recipe-carbs').value) || 0;
+		const fats = Number(document.getElementById('recipe-fats').value) || 0;
+
+		// Save to Firebase
+		db.collection("recipes").add({
+			name,
+			category,
+			ingredients,
+			nutrition: { calories, protein, carbs, fats },
+			timestamp: firebase.firestore.FieldValue.serverTimestamp()
+		})
+		.then(() => {
+			alert("Recipe saved!");
+			hideRecipeForm();
+			fetchAndRenderRecipes(); // See next step to implement this
+		})
+		.catch(error => {
+			console.error("Error saving recipe:", error);
+			alert("Failed to save recipe. Check the console for details.");
+		});
+	});
+
 
         function updateProgress() {
             // Define progress indicators and their corresponding sections
@@ -1063,6 +1104,7 @@
         // Initialize with default scaling
         document.addEventListener('DOMContentLoaded', function() {
             updatePortions();
+			fetchAndRenderRecipes();
         });
     </script>
 </body>
